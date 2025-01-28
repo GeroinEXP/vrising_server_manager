@@ -120,7 +120,15 @@ class ConfigEditor(QWidget):
                         self.tree.setItemWidget(item, 1, line_edit)
 
     def update_config_value(self, item, value):
-        item.setData(1, Qt.UserRole, value)
+        # Преобразуем значение в строку в зависимости от типа виджета
+        if isinstance(self.tree.itemWidget(item, 1), QCheckBox):
+            str_value = str(value == Qt.Checked).lower()
+        elif isinstance(self.tree.itemWidget(item, 1), QSpinBox):
+            str_value = str(value)
+        else:
+            str_value = str(value)
+        
+        item.setData(1, Qt.UserRole, str_value)
 
     def get_config(self):
         config = []
@@ -131,6 +139,18 @@ class ConfigEditor(QWidget):
             for j in range(section.childCount()):
                 item = section.child(j)
                 value = item.data(1, Qt.UserRole)
+                
+                # Проверка на None и установка значения по умолчанию
+                if value is None:
+                    widget = self.tree.itemWidget(item, 1)
+                    if isinstance(widget, QCheckBox):
+                        value = str(widget.isChecked()).lower()
+                    elif isinstance(widget, QSpinBox):
+                        value = str(widget.value())
+                    elif isinstance(widget, QLineEdit):
+                        value = widget.text()
+                    item.setData(1, Qt.UserRole, value)
+                
                 config.append(f'{item.text(0)} = {value}')
         return '\n'.join(config)
 
@@ -273,69 +293,91 @@ class CurrencyTracker(QWidget):
 
     def initUI(self):
         layout = QVBoxLayout()
-        splitter = QSplitter(Qt.Vertical)
-
-        self.online_table = QTableWidget()
-        self.online_table.setColumnCount(3)
-        self.online_table.setHorizontalHeaderLabels(['Игрок', 'Последний день', 'Время подключения'])
-        self.online_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-
+        
+        # Создаем вкладки
+        tabs = QTabWidget()
+        
+        # Вкладка статистики
+        stats_tab = QWidget()
+        stats_layout = QVBoxLayout()
+        
         self.currency_table = QTableWidget()
-        self.currency_table.setColumnCount(5)
-        self.currency_table.setHorizontalHeaderLabels(['Игрок', 'Дата', 'NPC', 'VBlood', 'PvP'])
+        self.currency_table.setColumnCount(2)
+        self.currency_table.setHorizontalHeaderLabels(['Игрок', 'Токены'])
         self.currency_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
         self.figure = plt.figure()
         self.canvas = FigureCanvas(self.figure)
         
-        splitter.addWidget(self.online_table)
-        splitter.addWidget(self.currency_table)
-        splitter.addWidget(self.canvas)
+        stats_layout.addWidget(self.currency_table)
+        stats_layout.addWidget(self.canvas)
+        stats_tab.setLayout(stats_layout)
         
-        layout.addWidget(splitter)
+        # Вкладка лога
+        log_tab = QWidget()
+        log_layout = QVBoxLayout()
+        
+        self.log_table = QTableWidget()
+        self.log_table.setColumnCount(6)
+        self.log_table.setHorizontalHeaderLabels(['От', 'Кому', 'Метод', 'Кем', 'Тип', 'Количество'])
+        self.log_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        
+        log_layout.addWidget(self.log_table)
+        log_tab.setLayout(log_layout)
+        
+        # Добавляем вкладки
+        tabs.addTab(stats_tab, "Статистика")
+        tabs.addTab(log_tab, "Лог")
+        
+        layout.addWidget(tabs)
         self.setLayout(layout)
 
-    def load_data(self, online_data, currency_data):
-        self.online_table.setRowCount(len(online_data))
-        for row, entry in enumerate(online_data):
-            self.online_table.setItem(row, 0, QTableWidgetItem(entry['player']))
-            self.online_table.setItem(row, 1, QTableWidgetItem(entry['LastDayConnection']))
-            self.online_table.setItem(row, 2, QTableWidgetItem(entry['LastDateTime']))
+    def load_data(self, tokens_data, log_data):
+        # Загрузка данных о токенах
+        self.currency_table.setRowCount(len(tokens_data))
+        players = []
+        tokens = []
+        
+        for i, entry in enumerate(tokens_data):
+            players.append(entry['CharacterName'])
+            tokens.append(entry['Tokens'])
+            
+            self.currency_table.setItem(i, 0, QTableWidgetItem(entry['CharacterName']))
+            self.currency_table.setItem(i, 1, QTableWidgetItem(str(entry['Tokens'])))
 
-        self.currency_table.setRowCount(len(currency_data))
-        for row, entry in enumerate(currency_data):
-            self.currency_table.setItem(row, 0, QTableWidgetItem(entry['CharacterName']))
-            self.currency_table.setItem(row, 1, QTableWidgetItem(entry['date']))
-            self.currency_table.setItem(row, 2, QTableWidgetItem(str(entry['AmountNpc'])))
-            self.currency_table.setItem(row, 3, QTableWidgetItem(str(entry['AmountVBlood'])))
-            self.currency_table.setItem(row, 4, QTableWidgetItem(str(entry['AmountPvp'])))
-
-        self.update_chart(currency_data)
-
-    def update_chart(self, data):
+        # Обновление графика
         self.figure.clear()
         ax = self.figure.add_subplot(111)
         
-        players = [entry['CharacterName'] for entry in data]
-        npc = [entry['AmountNpc'] for entry in data]
-        vblood = [entry['AmountVBlood'] for entry in data]
-        pvp = [entry['AmountPvp'] for entry in data]
-
-        bar_width = 0.25
-        index = range(len(players))
-
-        ax.bar(index, npc, bar_width, label='NPC')
-        ax.bar([i + bar_width for i in index], vblood, bar_width, label='VBlood')
-        ax.bar([i + 2*bar_width for i in index], pvp, bar_width, label='PvP')
-
+        # Создаем столбчатую диаграмму
+        bars = ax.bar(range(len(players)), tokens)
+        
+        # Настраиваем внешний вид графика
         ax.set_xlabel('Игроки')
-        ax.set_ylabel('Количество валюты')
-        ax.set_title('Распределение валюты по игрокам')
-        ax.set_xticks([i + bar_width for i in index])
-        ax.set_xticklabels(players, rotation=45)
-        ax.legend()
-
+        ax.set_ylabel('Количество токенов')
+        ax.set_title('Распределение токенов по игрокам')
+        ax.set_xticks(range(len(players)))
+        ax.set_xticklabels(players, rotation=45, ha='right')
+        
+        # Добавляем значения над столбцами
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{int(height)}',
+                   ha='center', va='bottom')
+        
+        plt.tight_layout()
         self.canvas.draw()
+
+        # Загрузка лога
+        self.log_table.setRowCount(len(log_data))
+        for i, entry in enumerate(log_data):
+            self.log_table.setItem(i, 0, QTableWidgetItem(entry['From']))
+            self.log_table.setItem(i, 1, QTableWidgetItem(entry['To']))
+            self.log_table.setItem(i, 2, QTableWidgetItem(entry['Method']))
+            self.log_table.setItem(i, 3, QTableWidgetItem(entry['By']))
+            self.log_table.setItem(i, 4, QTableWidgetItem(entry['Type']))
+            self.log_table.setItem(i, 5, QTableWidgetItem(str(entry['Amount'])))
 
 class AnnouncementEditor(QWidget):
     def __init__(self, parent=None):
@@ -486,8 +528,8 @@ class MainWindow(QMainWindow):
         try:
             config_path = '/BepInEx/config/BloodyRewards.cfg'
             products_path = '/BepInEx/config/BloodyShop/products_list.json'
-            online_path = '/BepInEx/config/BloodyRewards/dayli_time_online_list.json'
-            currency_path = '/BepInEx/config/BloodyRewards/user_currencies_per_day.json'
+            tokens_path = '/BepInEx/config/BloodyWallet/tokens.json'
+            log_path = '/BepInEx/config/BloodyWallet/log.json'
             announcements_path = '/BepInEx/config/KindredCommands/announcements.json'
 
             # Загрузка BloodyRewards.cfg
@@ -501,33 +543,49 @@ class MainWindow(QMainWindow):
                 products = json.loads(f.getvalue().decode('utf-8'))
                 self.products_editor.load_products(products)
 
-            # Загрузка статистики
+            # Загрузка tokens.json и log.json
             with BytesIO() as f:
-                self.ftp.retrbinary(f'RETR {online_path}', f.write)
-                online_data = json.loads(f.getvalue().decode('utf-8'))
-
+                self.ftp.retrbinary(f'RETR {tokens_path}', f.write)
+                tokens_data = json.loads(f.getvalue().decode('utf-8'))
+                
             with BytesIO() as f:
-                self.ftp.retrbinary(f'RETR {currency_path}', f.write)
-                currency_data = json.loads(f.getvalue().decode('utf-8'))
+                self.ftp.retrbinary(f'RETR {log_path}', f.write)
+                log_data = json.loads(f.getvalue().decode('utf-8'))
+                
+            self.currency_tracker.load_data(tokens_data, log_data)
 
+            # Загрузка announcements.json
             with BytesIO() as f:
                 self.ftp.retrbinary(f'RETR {announcements_path}', f.write)
                 announcements = json.loads(f.getvalue().decode('utf-8'))
                 self.announcement_editor.load_announcements(announcements)
-
-            self.currency_tracker.load_data(online_data, currency_data)
-            
+        
         except Exception as e:
             QMessageBox.critical(self, 'Ошибка', f'Ошибка загрузки файлов: {str(e)}')
 
     def save_all(self):
+        if not self.ftp:
+            QMessageBox.critical(self, 'Ошибка', 'FTP соединение потеряно. Пожалуйста, переподключитесь.')
+            return
+            
         try:
+            # Проверяем FTP соединение
+            try:
+                self.ftp.voidcmd("NOOP")
+            except:
+                # Если соединение разорвано, пытаемся переподключиться
+                self.ftp_connection.connect_ftp()
+                
             config_path = '/BepInEx/config/BloodyRewards.cfg'
             products_path = '/BepInEx/config/BloodyShop/products_list.json'
             announcements_path = '/BepInEx/config/KindredCommands/announcements.json'
 
             # Сохранение BloodyRewards.cfg
-            config_data = self.config_editor.get_config().encode('utf-8')
+            config_data = self.config_editor.get_config()
+            if not config_data.strip():
+                raise ValueError("Конфигурационные данные пусты")
+                
+            config_data = config_data.encode('utf-8')
             with BytesIO(config_data) as f:
                 self.ftp.storbinary(f'STOR {config_path}', f)
             
